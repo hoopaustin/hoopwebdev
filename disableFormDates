@@ -1,70 +1,41 @@
+<!-- Flatpickr CSS/JS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
 <script>
 (function () {
-  // ---- CONFIG ----
-  const MIN_DATE = "2025-10-01"; // YYYY-MM-DD
-  const FIELD_ID = "date-0c6b958e-5803-40d5-afb9-b046ad6d3d3e-field"; // your Squarespace input ID
+  const FIELD_ID = "date-0c6b958e-5803-40d5-afb9-b046ad6d3d3e-field"; // your input
+  const MIN_DATE = "2025-10-18"; // earliest allowed
+  const ALT_FORMAT = "m/d/Y";     // what users see
+  const SUBMIT_FORMAT = "Y-m-d";  // what gets submitted
 
-  function applyRules(input) {
-    if (!input || input.dataset._minApplied === "1") return;
-    input.setAttribute("min", MIN_DATE);
+  function initPicker() {
+    const input = document.getElementById(FIELD_ID);
+    if (!input || input.dataset._fpApplied === "1") return;
 
-    // Clear invalid manual entries
-    input.addEventListener("change", function () {
-      if (this.value && this.value < MIN_DATE) {
-        alert(`Please select a date on or after ${MIN_DATE}.`);
-        this.value = "";
-      }
+    // Ensure we don't trigger iOS native picker
+    input.setAttribute("type", "text");
+
+    flatpickr(input, {
+      disableMobile: true,       // force Flatpickr on iOS/Android
+      minDate: MIN_DATE,         // days before this are grayed out & unselectable
+      dateFormat: SUBMIT_FORMAT, // hidden/actual value submitted
+      altInput: true,            // show a nicer, human-readable date
+      altFormat: ALT_FORMAT,     // MM/DD/YYYY in UI
+      defaultDate: MIN_DATE,     // preselect earliest allowed
+      allowInput: false,
     });
 
-    // Guard on submit
-    const form = input.closest("form");
-    if (form && !form.dataset._dateGuard) {
-      form.dataset._dateGuard = "1";
-      form.addEventListener("submit", function (e) {
-        if (input.value && input.value < MIN_DATE) {
-          e.preventDefault();
-          alert(`Please select a date on or after ${MIN_DATE}.`);
-          input.focus();
-        }
-      });
-    }
-
-    input.dataset._minApplied = "1";
+    input.dataset._fpApplied = "1";
   }
 
-  // Try immediately + short retry loop (for late hydration)
-  function tryFindAndApply(attemptsLeft = 20) {
-    const input = document.getElementById(FIELD_ID);
-    if (input) {
-      applyRules(input);
-      return;
-    }
-    if (attemptsLeft > 0) {
-      setTimeout(() => tryFindAndApply(attemptsLeft - 1), 150);
-    }
+  function start() {
+    initPicker();
+    // Re-apply if Squarespace re-renders the block
+    new MutationObserver(initPicker).observe(document.body, { childList: true, subtree: true });
   }
 
-  // MutationObserver to catch AJAX re-renders
-  const observer = new MutationObserver(() => {
-    const input = document.getElementById(FIELD_ID);
-    if (input) applyRules(input);
-  });
-
-  // Start everything once the page has fully loaded
-  function init() {
-    tryFindAndApply();
-    observer.observe(document.body, { childList: true, subtree: true });
-  }
-
-  if (document.readyState === "complete") {
-    init();
-  } else {
-    window.addEventListener("load", init);
-  }
-
-  // Also re-run on history navigation (Squarespace AJAX page loads)
-  ["popstate", "pageshow"].forEach(evt => {
-    window.addEventListener(evt, () => tryFindAndApply());
-  });
+  if (document.readyState === "complete") start();
+  else window.addEventListener("load", start);
 })();
 </script>

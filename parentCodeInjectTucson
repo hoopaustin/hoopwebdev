@@ -1,0 +1,32 @@
+<!-- Stripe listener: receives cents from iframe and opens Stripe Checkout -->
+<script src="https://js.stripe.com/v3"></script>
+<script>
+(function(){
+  const STRIPE_PUBLISHABLE_KEY = "pk_live_51S6Dr1Ff6zeQll1nPziZJvTc2uFCnRpYCg1kL1eVMEwN0qI2MWaxtejJKZJZJ6q2HY4cRxAYQhYpWJjrOArsoHsc00fIkc16mV";
+  const EXPECTED_ORIGIN        = "https://hooptucson.com";
+
+  let stripe = null;
+  function ensureStripe(){ return (stripe ||= Stripe(STRIPE_PUBLISHABLE_KEY)); }
+
+  window.addEventListener("message", async (evt) => {
+    if (evt.origin !== EXPECTED_ORIGIN) return;   // only trust the iframe origin
+    const d = evt.data || {};
+    if (d.type !== "HOOP_SURCHARGE_CHECKOUT") return;
+
+    try {
+      const { price, quantity, successUrl, cancelUrl } = d;
+      const q = Math.max(1, parseInt(quantity,10) || 1);
+      const { error } = await ensureStripe().redirectToCheckout({
+        lineItems: [{ price, quantity: q }],
+        mode: "payment",
+        successUrl,
+        cancelUrl
+      });
+      if (error) alert(error.message || "Stripe error.");
+    } catch (e) {
+      console.error(e);
+      alert("Payment error. Please try again.");
+    }
+  }, false);
+})();
+</script>

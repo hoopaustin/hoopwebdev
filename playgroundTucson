@@ -1,0 +1,224 @@
+<!-- === Hoop Tucson • Delivery Calculator (Stripe client-only cents method) === -->
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+:root{ --bg:#fff; --panel:#f9fafb; --soft:#fff; --border:#e5e7eb;
+  --muted:#6b7280; --text:#111827; --brand:#2563eb; --chip:#f3f4f6; --ok:#16a34a; --warn:#d97706; }
+*{ box-sizing:border-box }
+body{ font-family:'Inter',system-ui,sans-serif }
+.cards{ padding:12px clamp(16px,4vw,28px); display:grid; gap:12px; grid-template-columns:repeat(12,1fr) }
+.card{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px; display:grid; gap:12px }
+
+/* Top card */
+.top-card h1{ margin:0; font-size:20px; text-align:center; font-weight:700; color:var(--text) }
+.row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center }
+.chip{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; background:var(--chip); border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--muted) }
+.chip b{ color:var(--text); font-weight:600 }
+.inputWrap{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:var(--soft); border:1px solid var(--border); border-radius:12px; padding:6px }
+.inputWrap input[type="text"]{ flex:1 1 420px; min-width:240px; background:transparent; border:0; outline:none; color:var(--text); font-size:15px; padding:10px 12px }
+.btn{ padding:10px 14px; border:0; border-radius:10px; cursor:pointer; background:var(--brand); color:#fff; font-weight:600; font-size:14px }
+.btn:disabled{ background:#93c5fd; cursor:not-allowed }
+.status{ font-size:13px; color:var(--muted); text-align:center }
+
+/* Bottom cards */
+.card h3{ margin:0 0 6px 0; font-size:13px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.3px }
+.kv{ display:flex; justify-content:space-between; align-items:center; border:1px dashed var(--border); border-radius:8px; padding:8px 10px }
+.k{ color:var(--muted); font-size:13px } .v{ font-weight:600; font-size:13px } .total{ font-size:18px }
+.ok,.warn{ font-size:13px; text-align:center } .ok{ color:var(--ok) } .warn{ color:var(--warn) }
+.actions{ display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap }
+.pay{
+  display:inline-flex; padding:10px 14px; border:0; border-radius:10px; color:#fff; background:#10b981;
+  font-weight:700; font-size:14px; box-shadow:0 5px 12px rgba(16,185,129,.25); cursor:pointer
+}
+.pay:disabled{ background:#86efac; cursor:not-allowed; opacity:.7 }
+
+.col-12{ grid-column:span 12 } .col-6{ grid-column:span 6 }
+@media (max-width:900px){ .col-6{ grid-column:span 12 } }
+
+/* Route card spacing */
+.map-card{ gap:6px } .map-card h3{ margin-bottom:4px }
+#map{ width:100%; min-height:320px; border:1px solid var(--border); border-radius:12px }
+
+/* Mobile: single-line input + centered button */
+@media (max-width:600px){
+  .inputWrap{ flex-direction:column; align-items:center }
+  .inputWrap input[type="text"]{
+    width:100%; height:44px; min-height:44px!important; max-height:44px;
+    line-height:44px; padding:0 12px; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    -webkit-appearance:none; appearance:none;
+  }
+  .inputWrap .btn{ align-self:center }
+}
+</style>
+
+<div class="cards">
+  <div class="card col-12 top-card">
+    <h1>Hoop Tucson — Delivery Calculator</h1>
+    <div class="inputWrap">
+      <input id="address" type="text" placeholder="Enter event address (e.g., 123 Main St, Tucson, AZ)" />
+      <button id="calcBtn" class="btn">Calculate & Preview Route</button>
+    </div>
+    <div class="row">
+      <span class="chip">Origin <b>Hoop Tucson Facility</b></span>
+      <span class="chip">Free radius <b>25 miles (one-way)</b></span>
+      <span class="chip">Rate <b>$2/mi (roundtrip)</b></span>
+    </div>
+    <div id="status" class="status"></div>
+  </div>
+
+  <div class="card col-6">
+    <h3>Delivery Summary</h3>
+    <div class="kv"><span class="k">Driving distance (one-way)</span><span class="v" id="distance">—</span></div>
+    <div class="kv"><span class="k">Billable miles (beyond 25)</span><span class="v" id="billable">—</span></div>
+    <div class="kv"><span class="k">Roundtrip miles billed</span><span class="v" id="roundtrip">—</span></div>
+    <div class="kv"><span class="k total">Surcharge</span><span class="v total" id="surcharge">—</span></div>
+
+    <div class="actions">
+      <button id="payBtn" class="pay" type="button" disabled>Pay</button>
+    </div>
+
+    <div id="freeNote" class="ok" style="display:none;">Within 25 miles. No surcharge.</div>
+    <div id="applyNote" class="warn" style="display:none;">Surcharge applies—use the Pay button to complete payment.</div>
+
+    <input type="hidden" id="delivery_surcharge" name="delivery_surcharge" value="0.00" />
+  </div>
+
+  <div class="card col-6 map-card">
+    <h3>Route Preview</h3>
+    <div id="map"></div>
+  </div>
+</div>
+
+<script>
+  // ---- Config for Hoop Tucson ----
+  const ORIGIN_LABEL   = "Hoop Tucson Facility";
+  const ORIGIN_ADDRESS = "8457 W Benidorm Loop, Tucson, AZ"; // provided origin
+  const FREE_RADIUS_MI = 25;
+  const RATE_PER_MI    = 2.00;
+
+  // Stripe (client-only cents method)
+  const STRIPE_CENTS_PRICE_ID = "price_1S9rmaFf6zeQll1nDFtIyR6J";
+  const STRIPE_SUCCESS_URL    = "https://hooptucson.com/stripe-success";
+  const STRIPE_CANCEL_URL     = "https://hooptucson.com/stripe-cancel";
+
+  // ---- Globals ----
+  let map, directionsService, directionsRenderer, geocoder, placesAutocomplete;
+
+  // ---- Utils ----
+  const metersToMiles = m => m / 1609.344;
+  const money = n => n.toLocaleString(undefined, { style:"currency", currency:"USD" });
+  const txt = (id, t) => document.getElementById(id).textContent = t;
+  const statusMsg = (m, isErr=false) => { const el = document.getElementById("status"); el.textContent = m||""; el.style.color = isErr ? "#dc2626" : "#6b7280"; };
+  const show = (id, v) => document.getElementById(id).style.display = v ? "" : "none";
+  const inIframe = () => { try { return window.self !== window.top; } catch { return true; } };
+
+  function computeSurcharge(oneWayMiles){
+    const billableOneWay    = Math.max(0, oneWayMiles - FREE_RADIUS_MI);
+    const roundtripBillable = billableOneWay * 2;
+    const surcharge         = roundtripBillable * RATE_PER_MI;
+    return { billableOneWay, roundtripBillable, surcharge };
+  }
+
+  function wirePay(){
+    const payBtn = document.getElementById("payBtn");
+    payBtn.addEventListener("click", () => {
+      if (payBtn.disabled) return;
+      const surcharge = Number(document.getElementById("delivery_surcharge").value || "0");
+      const cents = Math.round(surcharge * 100);
+      const payload = {
+        type: "HOOP_SURCHARGE_CHECKOUT",
+        price: STRIPE_CENTS_PRICE_ID,          // $0.01 price
+        quantity: Math.max(1, cents),          // exact cents
+        address: document.getElementById("address").value || "",
+        successUrl: STRIPE_SUCCESS_URL,
+        cancelUrl:  STRIPE_CANCEL_URL
+      };
+      if (inIframe()) {
+        window.parent.postMessage(payload, "*");
+        statusMsg("Opening secure payment…");
+      }
+    });
+  }
+
+  // ---- Google Maps ----
+  function initMap() {
+    map = new google.maps.Map(document.getElementById("map"), {
+      center: { lat: 32.22, lng: -110.97 }, zoom: 11,
+      mapTypeControl:false, streetViewControl:false, fullscreenControl:true
+    });
+
+    geocoder = new google.maps.Geocoder();
+    directionsService = new google.maps.DirectionsService();
+    directionsRenderer = new google.maps.DirectionsRenderer({ map });
+
+    // Pin origin
+    geocoder.geocode({ address: ORIGIN_ADDRESS }, (results, status) => {
+      if (status === "OK" && results?.[0]) {
+        new google.maps.Marker({ position: results[0].geometry.location, map, title: ORIGIN_LABEL, label: "O" });
+        map.setCenter(results[0].geometry.location);
+      }
+    });
+
+    // Global autocomplete (no Austin bias)
+    const input = document.getElementById("address");
+    placesAutocomplete = new google.maps.places.Autocomplete(input, {
+      fields: ["formatted_address", "geometry"],
+      strictBounds: false
+    });
+
+    document.getElementById("calcBtn").addEventListener("click", handleCalculate);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); handleCalculate(); } });
+    wirePay();
+  }
+
+  function handleCalculate() {
+    const dest = document.getElementById("address").value.trim();
+    const payBtn = document.getElementById("payBtn");
+    if (!dest) { statusMsg("Please enter an event address.", true); payBtn.disabled = true; return; }
+
+    statusMsg("Calculating route and surcharge…");
+    document.getElementById("calcBtn").disabled = true;
+
+    directionsService.route({
+      origin: ORIGIN_ADDRESS,
+      destination: dest,
+      travelMode: google.maps.TravelMode.DRIVING,
+    }, (response, status) => {
+      document.getElementById("calcBtn").disabled = false;
+
+      if (status !== "OK" || !response?.routes?.length) {
+        statusMsg("No route found. Try again.", true);
+        show("freeNote", false); show("applyNote", false);
+        payBtn.disabled = true;
+        return;
+      }
+
+      directionsRenderer.setDirections(response);
+      if (response.routes[0].bounds) map.fitBounds(response.routes[0].bounds);
+
+      const leg    = response.routes[0].legs[0];
+      const meters = leg.distance?.value ?? 0;
+      const miles  = metersToMiles(meters);
+
+      const { billableOneWay, roundtripBillable, surcharge } = computeSurcharge(miles);
+
+      txt("distance",  miles ? `${miles.toFixed(1)} mi` : "n/a");
+      txt("billable",  `${billableOneWay.toFixed(1)} mi`);
+      txt("roundtrip", `${roundtripBillable.toFixed(1)} mi`);
+      txt("surcharge", money(surcharge));
+      document.getElementById("delivery_surcharge").value = surcharge.toFixed(2);
+
+      const hasSurcharge = surcharge > 0.0001;
+      show("freeNote", !hasSurcharge);
+      show("applyNote", hasSurcharge);
+      payBtn.disabled = !hasSurcharge;
+
+      statusMsg("");
+    });
+  }
+
+  window.initMap = initMap;
+</script>
+
+<!-- Google Maps (use Tucson partner's own API key) -->
+<script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_KEY&callback=initMap&libraries=places&v=weekly" async defer></script>

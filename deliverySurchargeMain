@@ -1,9 +1,9 @@
-<!-- === Hoop Austin • Delivery Distance & Surcharge (Calculator + Pay trigger; Pay disabled until needed) === -->
+<!-- === Hoop Austin • Delivery Distance & Surcharge (with Service Area check + modal) === -->
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 :root{ --bg:#fff; --panel:#f9fafb; --soft:#fff; --border:#e5e7eb;
-  --muted:#6b7280; --text:#111827; --brand:#2563eb; --chip:#f3f4f6; --ok:#16a34a; --warn:#d97706; }
+  --muted:#6b7280; --text:#111827; --brand:#2563eb; --chip:#f3f4f6; --ok:#16a34a; --warn:#d97706; --danger:#dc2626; }
 *{ box-sizing:border-box }
 body{ font-family:'Inter',system-ui,sans-serif }
 .cards{ padding:12px clamp(16px,4vw,28px); display:grid; gap:12px; grid-template-columns:repeat(12,1fr) }
@@ -39,6 +39,23 @@ body{ font-family:'Inter',system-ui,sans-serif }
 .map-card{ gap:6px } .map-card h3{ margin-bottom:4px }
 #map{ width:100%; min-height:320px; border:1px solid var(--border); border-radius:12px }
 
+/* Modal */
+.modal{
+  position:fixed; inset:0; display:none; place-items:center; background:rgba(17,24,39,.45);
+  z-index:9999; padding:16px;
+}
+.modal.open{ display:grid }
+.modal__card{
+  background:#fff; color:#111827; border-radius:14px; border:1px solid var(--border);
+  max-width:560px; width:100%; padding:18px; box-shadow:0 10px 30px rgba(0,0,0,.18)
+}
+.modal__title{ margin:0 0 8px 0; font-size:18px; font-weight:800 }
+.modal__body{ font-size:14px; color:#374151; margin-bottom:14px }
+.modal__note{ font-size:12px; color:#6b7280; margin-top:6px }
+.modal__actions{ display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end }
+.btn-outline{ background:#fff; color:#111827; border:1px solid var(--border); padding:8px 12px; border-radius:10px; cursor:pointer }
+.btn-danger{ background:var(--danger); color:#fff; border:0; padding:8px 12px; border-radius:10px; cursor:pointer }
+
 /* Mobile: single-line input + centered button */
 @media (max-width:600px){
   .inputWrap{ flex-direction:column; align-items:center }
@@ -62,6 +79,7 @@ body{ font-family:'Inter',system-ui,sans-serif }
       <span class="chip">Origin <b>Hoop Austin -South Facility</b></span>
       <span class="chip">Free radius <b>30 miles (one-way)</b></span>
       <span class="chip">Rate <b>$2/mi (roundtrip)</b></span>
+      <span class="chip" id="serviceChip">Service area <b>80 miles (one-way)</b></span>
     </div>
     <div id="status" class="status"></div>
   </div>
@@ -89,12 +107,33 @@ body{ font-family:'Inter',system-ui,sans-serif }
   </div>
 </div>
 
+<!-- Service area modal -->
+<div class="modal" id="serviceModal" role="dialog" aria-modal="true" aria-labelledby="servTitle">
+  <div class="modal__card">
+    <h2 class="modal__title" id="servTitle">Outside our service area</h2>
+    <div class="modal__body" id="servBody">
+      We’re sorry—this address is currently outside our delivery radius.
+      Please <a id="contactLinkInline" href="#" target="_top" style="color:#2563eb;text-decoration:underline;">contact us</a>
+      and we’ll see if we can make alternative arrangements to get a trailer to you.
+      <div class="modal__note" id="servMilesNote"></div>
+    </div>
+    <div class="modal__actions">
+      <button type="button" class="btn-outline" id="servClose">Close</button>
+      <button type="button" class="btn-danger" id="servContact">Contact us</button>
+    </div>
+  </div>
+</div>
+
 <script>
   // ---- Config ----
-  const ORIGIN_LABEL   = "Hoop Austin -South Facility";
-  const ORIGIN_ADDRESS = "8008 S Congress Ave, Austin, TX 78745";
-  const FREE_RADIUS_MI = 30;
-  const RATE_PER_MI    = 2.00;
+  const ORIGIN_LABEL       = "Hoop Austin -South Facility";
+  const ORIGIN_ADDRESS     = "8008 S Congress Ave, Austin, TX 78745";
+  const FREE_RADIUS_MI     = 30;
+  const RATE_PER_MI        = 2.00;
+
+  // NEW: service area (one-way driving miles). Update as needed.
+  const SERVICE_AREA_MAX_MI = 80;
+  const CONTACT_US_URL      = "https://www.hoop-austin.com/book";
 
   // Values passed to parent for Stripe
   const STRIPE_CENTS_PRICE_ID = "price_1S3fDECklDmvC0Bf3vBuUvLw";
@@ -107,9 +146,9 @@ body{ font-family:'Inter',system-ui,sans-serif }
   // ---- Utils ----
   const metersToMiles = m => m / 1609.344;
   const money = n => n.toLocaleString(undefined, { style:"currency", currency:"USD" });
-  const txt = (id, t) => document.getElementById(id).textContent = t;
+  const txt   = (id, t) => document.getElementById(id).textContent = t;
   const statusMsg = (m, isErr=false) => { const el = document.getElementById("status"); el.textContent = m||""; el.style.color = isErr ? "#dc2626" : "#6b7280"; };
-  const show = (id, v) => document.getElementById(id).style.display = v ? "" : "none";
+  const show  = (id, v) => document.getElementById(id).style.display = v ? "" : "none";
   const inIframe = () => { try { return window.self !== window.top; } catch { return true; } };
 
   function computeSurcharge(oneWayMiles){
@@ -117,6 +156,34 @@ body{ font-family:'Inter',system-ui,sans-serif }
     const roundtripBillable = billableOneWay * 2;
     const surcharge         = roundtripBillable * RATE_PER_MI; // exact cents
     return { billableOneWay, roundtripBillable, surcharge };
+  }
+
+  // ---- Modal helpers ----
+  function openServiceModal(miles){
+    const modal = document.getElementById("serviceModal");
+    const note  = document.getElementById("servMilesNote");
+    const linkInline = document.getElementById("contactLinkInline");
+    note.textContent = `Entered address is approximately ${miles.toFixed(1)} miles (one-way) from our facility.`;
+    linkInline.href = CONTACT_US_URL;
+
+    modal.classList.add("open");
+    // Wire buttons
+    const closeBtn   = document.getElementById("servClose");
+    const contactBtn = document.getElementById("servContact");
+    contactBtn.onclick = () => { window.top.location.href = CONTACT_US_URL; };
+    closeBtn.onclick   = () => { modal.classList.remove("open"); };
+    // Escape to close
+    function onEsc(e){ if (e.key === "Escape") { modal.classList.remove("open"); document.removeEventListener("keydown", onEsc); } }
+    document.addEventListener("keydown", onEsc);
+  }
+
+  function clearSummaryAndDisablePay(){
+    txt("billable", "—");
+    txt("roundtrip", "—");
+    txt("surcharge", "—");
+    document.getElementById("delivery_surcharge").value = "0.00";
+    show("freeNote", false); show("applyNote", false);
+    document.getElementById("payBtn").disabled = true;
   }
 
   function wirePay(){
@@ -127,8 +194,8 @@ body{ font-family:'Inter',system-ui,sans-serif }
       const cents = Math.round(surcharge * 100);
       const payload = {
         type: "HOOP_SURCHARGE_CHECKOUT",
-        price: "price_1S3fDECklDmvC0Bf3vBuUvLw",   // $0.01 price
-        quantity: Math.max(1, cents),              // exact cents
+        price: "price_1S3fDECklDmvC0Bf3vBuUvLw",
+        quantity: Math.max(1, cents),
         address: document.getElementById("address").value || "",
         successUrl: "https://www.hoop-austin.com/stripe-success",
         cancelUrl:  "https://www.hoop-austin.com/stripe-cancel"
@@ -142,6 +209,10 @@ body{ font-family:'Inter',system-ui,sans-serif }
 
   // ---- Google Maps ----
   function initMap() {
+    // Update chip text with configured radius
+    const chip = document.getElementById("serviceChip");
+    if (chip) chip.innerHTML = `Service area <b>${SERVICE_AREA_MAX_MI} miles (one-way)</b>`;
+
     map = new google.maps.Map(document.getElementById("map"), {
       center: { lat: 30.23, lng: -97.76 }, zoom: 11, mapTypeControl:false, streetViewControl:false, fullscreenControl:true
     });
@@ -161,7 +232,7 @@ body{ font-family:'Inter',system-ui,sans-serif }
     const input = document.getElementById("address");
     placesAutocomplete = new google.maps.places.Autocomplete(input, {
       fields: ["formatted_address", "geometry"],
-      bounds: new google.maps.LatLngBounds({ lat: 29.5, lng: -98.5 }, { lat: 30.9, lng: -97.0 }),
+     // bounds: new google.maps.LatLngBounds({ lat: 29.5, lng: -98.5 }, { lat: 30.9, lng: -97.0 }),
       strictBounds: false
     });
 
@@ -200,6 +271,17 @@ body{ font-family:'Inter',system-ui,sans-serif }
       const meters = leg.distance?.value ?? 0;
       const miles  = metersToMiles(meters);
 
+      // --- Service area enforcement ---
+      if (miles > SERVICE_AREA_MAX_MI) {
+        // Show the modal and reset summary/pay
+        txt("distance", `${miles.toFixed(1)} mi`);
+        openServiceModal(miles);
+        clearSummaryAndDisablePay();
+        statusMsg("Outside service area.", true);
+        return;
+      }
+
+      // --- Within service area: compute surcharge as before ---
       const { billableOneWay, roundtripBillable, surcharge } = computeSurcharge(miles);
 
       txt("distance",  miles ? `${miles.toFixed(1)} mi` : "n/a");
@@ -211,7 +293,7 @@ body{ font-family:'Inter',system-ui,sans-serif }
       const hasSurcharge = surcharge > 0.0001;
       show("freeNote", !hasSurcharge);
       show("applyNote", hasSurcharge);
-      payBtn.disabled = !hasSurcharge;   // <-- point #2
+      payBtn.disabled = !hasSurcharge;
 
       statusMsg("");
     });

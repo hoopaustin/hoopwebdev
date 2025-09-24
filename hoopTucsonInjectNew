@@ -1,0 +1,51 @@
+<!-- Parent listener: receives cents from the iframe and opens Stripe Checkout -->
+<script src="https://js.stripe.com/v3"></script>
+<script>
+(function(){
+  const STRIPE_PUBLISHABLE_KEY = "pk_live_51S6Dr1Ff6zeQll1nPziZJvTc2uFCnRpYCg1kL1eVMEwN0qI2MWaxtejJKZJZJ6q2HY4cRxAYQhYpWJjrOArsoHsc00fIkc16mV";
+  const DEFAULT_SUCCESS_URL    = "https://www.hooptucson.com/stripe-success";
+  const DEFAULT_CANCEL_URL     = "https://www.hooptucson.com/stripe-cancel";
+  const EXPECTED_ORIGIN        = "https://www.hooptucson.com"; // where /playground lives
+
+  let stripe = null;
+  function ensureStripe(){
+    if (!stripe) {
+      try { stripe = Stripe(STRIPE_PUBLISHABLE_KEY); }
+      catch(e){ console.error("Stripe init failed", e); }
+    }
+    return !!stripe;
+  }
+
+  window.addEventListener("message", async (evt) => {
+    // Only accept messages from your own origin (the iframe)
+    if (evt.origin !== EXPECTED_ORIGIN) return;
+
+    const d = evt.data || {};
+    if (d.type !== "HOOP_SURCHARGE_CHECKOUT") return;
+
+    if (!ensureStripe()) { alert("Stripe not available."); return; }
+
+    // The child sends a $0.01 Price ID and the exact cents as quantity
+    const price    = d.price || "price_1S9rmaFf6zeQll1nDFtIyR6J";
+    const quantity = Math.max(1, parseInt(d.quantity, 10)); // cents
+    const address  = d.address || "";
+
+    const successUrl = d.successUrl || DEFAULT_SUCCESS_URL;
+    const cancelUrl  = d.cancelUrl  || DEFAULT_CANCEL_URL;
+
+    try {
+      const { error } = await stripe.redirectToCheckout({
+        lineItems: [{ price, quantity }],
+        mode: "payment",
+        successUrl: successUrl,
+        cancelUrl:  cancelUrl,
+        clientReferenceId: address || undefined
+      });
+      if (error) alert(error.message || "Stripe error.");
+    } catch (e) {
+      console.error(e);
+      alert("Payment error. Please try again.");
+    }
+  }, false);
+})();
+</script>

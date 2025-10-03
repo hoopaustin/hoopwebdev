@@ -1,0 +1,421 @@
+<!-- Address Checker (2 zones: Z1 Free, Z2 $50) with origin bias radius -->
+<style>
+  :root{ --btn-enabled:#04A2DB; --btn-disabled:#B9EBFE; --btn-text:#ffffff; }
+  #addr-wrap, #addr-wrap *{ box-sizing:border-box; }
+  #addr-wrap{ width:min(680px,100%); margin:0 auto; padding-inline:16px; text-align:center; position:relative; }
+  #addr-title{ width:100%; margin:0 auto 10px; font-weight:700; font-size:18px; }
+  @media (min-width:768px){ #addr-title{ width:80%; font-size:22px; } }
+
+  #pricing,#pricing-list{ margin:10px 0 0; font:700 18px/1.4 system-ui, Arial, sans-serif; color:#444; }
+  #pricing-list{ margin:0 0 10px; font:400 15px/1.4 system-ui, Arial, sans-serif; white-space:wrap; overflow:hidden; text-overflow:ellipsis; }
+
+  .addr-input-wrap{ position:relative; display:flex; align-items:center; }
+  #addr{
+    flex:1; display:block; width:100%; margin:0 auto; padding:14px 42px 14px 18px;
+    border:1px solid #c8ccd0; border-radius:9999px; font-size:16px;
+    background:linear-gradient(180deg,#fff 0%,#fbfbfb 45%,#f5f6f7 100%);
+    box-shadow:0 1px 2px rgba(0,0,0,.06), 0 2px 12px rgba(0,0,0,.04);
+    outline:none;
+  }
+  #addr:focus{ border-color:#04A2DB33; box-shadow:0 0 0 3px rgba(4,162,219,.18), 0 1px 2px rgba(0,0,0,.06), 0 2px 12px rgba(0,0,0,.05); }
+  #clear-addr{
+    position:absolute; right:14px; top:50%; transform:translateY(-50%);
+    background:none; border:none; padding:0; font-size:18px; line-height:1; cursor:pointer; color:#888; display:none;
+  }
+  #clear-addr:hover{ color:#444; }
+
+  #full-address{ font:13px/1.4 system-ui, Arial, sans-serif; color:#555; word-wrap:break-word; max-width:100%; }
+  #full-address:empty{ display:none; } 
+  #full-address:not(:empty){ margin-top:6px; }
+
+  #zone-msg{
+    font:14px/1.45 system-ui, Arial, sans-serif; color:#222; display:flex; align-items:center; flex-wrap:wrap;
+    column-gap:8px; row-gap:4px; justify-content:center; max-width:100%; text-align:center;
+  }
+  #zone-msg:empty{ display:none; } 
+  #zone-msg:not(:empty){ margin-top:8px; }
+  #zone-msg strong{ font-weight:800; }
+  .zone-text{ white-space:normal; overflow-wrap:anywhere; }
+
+  #msg{ margin-top:10px; font:13px/1.5 system-ui, Arial, sans-serif; color:#555; }
+  #actions{ margin-top:12px }
+  #action-btn{
+    display:block; inline-size:100%; max-inline-size:100%; text-align:center; padding:12px 18px; border-radius:9999px;
+    font-weight:600; text-decoration:none; transition:filter .15s ease, opacity .15s ease; border:0;
+    color:var(--btn-text); background:var(--btn-enabled);
+  }
+  #action-btn[disabled]{ cursor:not-allowed; background:var(--btn-disabled); opacity:.9; }
+  #action-btn:not([disabled]):hover{ filter:brightness(1.05); }
+
+  @media (max-width:480px){ #addr, #action-btn{ padding:12px 16px; } }
+
+  .sqs-block-code #addr-wrap{ position:relative; z-index:9999 }
+  .divider{ border:0; border-top:1px solid #B2BEB5; margin:5px auto 10px; width:80%; }
+  .pac-container{ z-index:100000 !important; }
+
+  .check-icon,.dollar-icon,.x-icon{
+    width:20px; height:20px; border:1.5px solid #d1d5db; border-radius:50%; display:inline-flex; align-items:center; justify-content:center;
+    flex:0 0 auto; color:#fff; font:700 12px/1 Arial, sans-serif;
+  }
+  .check-icon{ background:#16a34a; position:relative; }
+  .check-icon::after{ content:""; position:absolute; width:6px; height:12px; border:solid #fff; border-width:0 2px 2px 0; transform:translateY(-1px) rotate(45deg); }
+  .dollar-icon{ background:#16a34a; }
+  .x-icon{ background:#dc2626; }
+</style>
+
+<div id="addr-wrap">
+  <h3 id="addr-title">Enter your event address to confirm availability in your area</h3>
+
+  <div class="addr-input-wrap">
+    <input id="addr" type="text" placeholder="Venue, school, park, or address" autocomplete="off" autocapitalize="off" spellcheck="false" />
+    <button id="clear-addr" type="button" aria-label="Clear address">&times;</button>
+  </div>
+
+  <div id="full-address"></div>
+  <div id="zone-msg" aria-live="polite"></div>
+
+  <div id="actions"><a id="action-btn" href="#" aria-disabled="true" disabled>Book Now</a></div>
+  <div id="msg"><em>*Delivery charge may apply based on distance. Txn fees apply.</em></div>
+
+  <hr class="divider">
+  <div id="pricing">Pricing*</div>
+  <div id="pricing-list">3hrs ($350) | 4hrs ($425) | 5hrs ($500) <br> All-Day ($700)</div>
+</div>
+
+<script>
+(function(){
+  /* =======================
+     CONFIG — EDIT THESE ONLY
+     ======================= */
+  const CONFIG = {
+    GOOGLE_KEY: "AIzaSyAaaw90ZMtQFt6PPzl95laRKxoMqwo-5wQ",
+
+    // Origin for distance calc + autocomplete bias
+    ORIGIN_ADDRESS: "8421 Dorchester Rd, North Charleston, SC 29420",
+    ORIGIN_LATLNG: null, // will be set after geocoding
+
+    // Bias radius (miles) for Google Places Autocomplete; set to 0/false to disable.
+    BIAS_RADIUS_MI: 100,
+    // If true, predictions are confined to the bounds; if false, results are just biased.
+    STRICT_BOUNDS: false,
+
+    // 2-Zone thresholds (in miles)
+    ZONE_THRESHOLDS: { Z1_MAX: 30, SERVICE_MAX: 55 }, // <=30 = Zone 1; 30–55 = Zone 2; >55 = OOS
+
+    // UI labels
+    ZONE_NAMES: { z1: "Zone 1", z2: "Zone 2" },
+    ZONE_PRICING_LABEL: { z1: "Free Delivery", z2: "Delivery Fee: $50" },
+    ZONE_PRICING_VALUE: { z1: 0, z2: 50 },
+
+    // Booking endpoints
+    BOOKING_PAGE: "/scheduling",
+    CONTACT_URL: "https://www.hoop-austin.com/book",
+
+    // Acuity (optional, used by your scheduler page to prefill)
+    ACUITY: {
+      OWNER_ID: "35772977",
+      ADDRESS_FIELD_ID: "17319746",
+      CATEGORY_BY_ZONE: {
+        z1: "Free Delivery",
+        z2: "Delivery Zone 50"
+      }
+    },
+
+    // Storage / UTM
+    STORAGE: {
+      SESSION_KEY: "HOOP_BOOKING_V1",
+      UTM_KEY: "HOOP_BOOKING_V1_UTM",
+      UTM_KEYS: ["utm_source","utm_medium","utm_campaign","utm_term","utm_content","gclid","fbclid"]
+    }
+  };
+  /* ======================= */
+
+  // ---------- DOM refs ----------
+  const $ = id => document.getElementById(id);
+  const input = $("addr"),
+        fullAddr = $("full-address"),
+        zoneMsg = $("zone-msg"),
+        btn = $("action-btn"),
+        clearBtn = $("clear-addr");
+
+  // ---------- Helpers ----------
+  const REG_ADDR = /^\s*\d+\s+.+/; // rough check for manual address typing
+  const isLikelyAddress = t => REG_ADDR.test(t);
+
+  const milesToMeters = mi => mi * 1609.344;
+
+  function stripCountry(addr){
+    if(!addr) return addr;
+    return addr.replace(/\s*,\s*(USA|US|United States(?: of America)?)\s*$/i, "").trim();
+  }
+
+  function setBtnState(state, href){
+    const labels = { disabled:"Book Now", book:"Book Now", contact:"Contact Us" };
+    btn.textContent = labels[state] || "Book Now";
+    if(state === "disabled"){
+      btn.href = "#"; btn.setAttribute("disabled",""); btn.setAttribute("aria-disabled","true"); btn.onclick = null;
+    }else{
+      btn.removeAttribute("disabled"); btn.setAttribute("aria-disabled","false"); btn.href = href || "#";
+    }
+  }
+
+  function captureUTMs(){
+    const qs = new URLSearchParams(location.search), utm = {};
+    CONFIG.STORAGE.UTM_KEYS.forEach(k => { if(qs.has(k)) utm[k] = qs.get(k); });
+    if(Object.keys(utm).length) sessionStorage.setItem(CONFIG.STORAGE.UTM_KEY, JSON.stringify(utm));
+  }
+
+  // 2-zone decision
+  function zoneFromMiles(mi){
+    const { Z1_MAX, SERVICE_MAX } = CONFIG.ZONE_THRESHOLDS;
+    return mi <= Z1_MAX ? "z1" : mi <= SERVICE_MAX ? "z2" : "out";
+  }
+
+  function zoneMessageHTML(zone, miles){
+    const m = miles.toFixed(1);
+    if(zone==="z1"){
+      return `<span class="check-icon" aria-hidden="true"></span><span class="zone-text"><strong>~${m} mi - ${CONFIG.ZONE_NAMES.z1} - ${CONFIG.ZONE_PRICING_LABEL.z1}</strong></span>`;
+    }
+    if(zone==="z2"){
+      return `<span class="dollar-icon" aria-hidden="true">$</span><span class="zone-text"><strong>~${m} mi - ${CONFIG.ZONE_NAMES.z2} - ${CONFIG.ZONE_PRICING_LABEL.z2}</strong></span>`;
+    }
+    return `<span class="x-icon" aria-hidden="true">X</span><span class="zone-text"><strong>~${m} mi - Outside of our service area. Please contact us.</strong></span>`;
+  }
+
+  function goToBooking(zone, address){
+    const payload = {
+      zone,
+      zoneName: CONFIG.ZONE_NAMES[zone] || "",
+      zonePriceLabel: CONFIG.ZONE_PRICING_LABEL[zone] || "",
+      zonePriceValue: CONFIG.ZONE_PRICING_VALUE[zone] ?? null,
+      category: CONFIG.ACUITY.CATEGORY_BY_ZONE[zone] || CONFIG.ACUITY.CATEGORY_BY_ZONE.z1,
+      address: stripCountry(address),
+      acuityFieldId: CONFIG.ACUITY.ADDRESS_FIELD_ID,
+      ts: Date.now()
+    };
+    sessionStorage.setItem(CONFIG.STORAGE.SESSION_KEY, JSON.stringify(payload));
+    location.assign(CONFIG.BOOKING_PAGE); // clean URL (no miles/params)
+  }
+
+  function haversineMiles(a,b){
+    const r = Math.PI/180, R = 3958.7613;
+    const dLat = (b.lat-a.lat)*r, dLng = (b.lng-a.lng)*r;
+    const la1 = a.lat*r, la2 = b.lat*r;
+    const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+    return 2*R*Math.asin(Math.sqrt(h));
+  }
+
+  let geocoder, dmService, autocomplete, selectedPlace=null;
+
+  function debounce(fn, wait=600){ let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); }; }
+  function clearDynamicBlocks(){ fullAddr.textContent = ""; zoneMsg.innerHTML = ""; }
+  function toggleClearBtn(){ clearBtn.style.display = input.value.trim() ? "block" : "none"; if(!input.value.trim()) clearDynamicBlocks(); }
+  function showFullAddress(addr){ fullAddr.textContent = stripCountry(addr) || ""; }
+
+  const geocodeByAddress = address => new Promise((res,rej)=>{
+    geocoder.geocode({ address }, (r,s)=>{
+      if(s==="OK" && r[0]?.geometry){
+        const L = r[0].geometry.location;
+        res({ lat:L.lat(), lng:L.lng(), formatted:r[0].formatted_address });
+      }else rej(new Error("Geocode failed:"+s));
+    });
+  });
+
+  const geocodeByPlaceId = placeId => new Promise((res,rej)=>{
+    geocoder.geocode({ placeId }, (r,s)=>{
+      if(s==="OK" && r[0]?.geometry){
+        const L = r[0].geometry.location;
+        res({ lat:L.lat(), lng:L.lng(), formatted:r[0].formatted_address });
+      }else rej(new Error("Geocode by placeId failed:"+s));
+    });
+  });
+
+  const reverseGeocode = (latLng) => new Promise((res,rej)=>{
+    geocoder.geocode({ location: latLng }, (r,s)=>{
+      if(s==="OK" && r[0]){
+        const L = r[0].geometry.location;
+        res({ lat:L.lat(), lng:L.lng(), formatted:r[0].formatted_address });
+      }else rej(new Error("Reverse geocode failed:"+s));
+    });
+  });
+
+  const drivingMiles = (o,d) => new Promise((res,rej)=>{
+    dmService.getDistanceMatrix(
+      { origins:[o], destinations:[d], travelMode:google.maps.TravelMode.DRIVING, unitSystem:google.maps.UnitSystem.IMPERIAL },
+      (r,s)=>{
+        if(s!=="OK") return rej(new Error("DM failed"));
+        const el = r?.rows?.[0]?.elements?.[0];
+        if(!el || el.status!=="OK") return rej(new Error("No route"));
+        const mi = parseFloat((el.distance?.text||"").replace(/[^\d.]/g,""));
+        if(isNaN(mi)) return rej(new Error("Parse miles"));
+        res(mi);
+      }
+    );
+  });
+
+  // Resolve a selected place to a postal address string + lat/lng
+  async function resolvePlaceToAddress(place, rawInput){
+    if(place?.formatted_address && place.geometry?.location){
+      return {
+        formatted: place.formatted_address,
+        lat: place.geometry.location.lat(),
+        lng: place.geometry.location.lng()
+      };
+    }
+    if(place?.place_id){ return await geocodeByPlaceId(place.place_id); }
+    if(place?.geometry?.location){
+      const latLng = { lat: place.geometry.location.lat(), lng: place.geometry.location.lng() };
+      return await reverseGeocode(latLng);
+    }
+    if(rawInput){ return await geocodeByAddress(rawInput); }
+    throw new Error("Unable to resolve place to address");
+  }
+
+  async function runCheck(){
+    try{
+      setBtnState("disabled");
+
+      // Origin (geocoded earlier in init); fallback geocode if missing
+      let originLL = CONFIG.ORIGIN_LATLNG;
+      if(!originLL){
+        const o = await geocodeByAddress(CONFIG.ORIGIN_ADDRESS);
+        originLL = { lat:o.lat, lng:o.lng };
+      }
+
+      // Destination
+      let destLL, formattedAddress, raw = input.value.trim();
+      if(selectedPlace){
+        const resolved = await resolvePlaceToAddress(selectedPlace, raw);
+        formattedAddress = resolved.formatted;
+        destLL = { lat:resolved.lat, lng:resolved.lng };
+      }else if(raw){
+        const g = await geocodeByAddress(raw);
+        formattedAddress = g.formatted;
+        destLL = { lat:g.lat, lng:g.lng };
+      }else{
+        throw new Error("No destination input");
+      }
+
+      showFullAddress(formattedAddress);
+
+      // Distance (prefer driving; fallback haversine)
+      let miles;
+      try{ miles = await drivingMiles(originLL, destLL); }
+      catch{ miles = haversineMiles(originLL, destLL); }
+
+      const zone = zoneFromMiles(miles);
+      zoneMsg.innerHTML = zoneMessageHTML(zone, miles);
+
+      if(zone==="out"){
+        setBtnState("contact", CONFIG.CONTACT_URL);
+        btn.onclick = null;
+      }else{
+        setBtnState("book", "#");
+        btn.onclick = (e)=>{ e.preventDefault(); goToBooking(zone, formattedAddress); };
+      }
+    }catch(e){
+      console.error(e);
+      zoneMsg.innerHTML = `<span class="x-icon" aria-hidden="true">X</span><span class="zone-text"><strong>Address check failed. Please try again or pick a suggestion.</strong></span>`;
+      setBtnState("disabled");
+    }
+  }
+
+  async function init(){
+    try{
+      captureUTMs();
+      geocoder = new google.maps.Geocoder();
+      dmService = new google.maps.DistanceMatrixService();
+
+      // 1) Geocode origin up front so we can bias Autocomplete
+      let origin = CONFIG.ORIGIN_LATLNG;
+      if(!origin){
+        const o = await geocodeByAddress(CONFIG.ORIGIN_ADDRESS);
+        origin = CONFIG.ORIGIN_LATLNG = { lat:o.lat, lng:o.lng };
+      }
+
+      // 2) Build bounds from bias radius (if enabled)
+      let autocompleteOpts = {
+        types: ["establishment", "geocode"],
+        fields: ["place_id","name","geometry","formatted_address"],
+        componentRestrictions: { country: "us" } // adjust/remove if you want broader results
+      };
+
+      if(CONFIG.BIAS_RADIUS_MI && origin){
+        const circle = new google.maps.Circle({
+          center: origin,
+          radius: milesToMeters(CONFIG.BIAS_RADIUS_MI)
+        });
+        const bounds = circle.getBounds();
+        autocompleteOpts.bounds = bounds;
+        autocompleteOpts.strictBounds = !!CONFIG.STRICT_BOUNDS; // true=restrict; false=bias
+      }
+
+      // 3) Init Autocomplete with bounds/strictness
+      autocomplete = new google.maps.places.Autocomplete(input, autocompleteOpts);
+
+      // If origin/bounds change later, you could update like:
+      // autocomplete.setBounds(newBounds); autocomplete.setOptions({ strictBounds: true/false });
+
+      autocomplete.addListener("place_changed", async ()=>{
+        selectedPlace = autocomplete.getPlace() || null;
+        if (selectedPlace) {
+          try{
+            const { formatted } = await resolvePlaceToAddress(selectedPlace, input.value.trim());
+            showFullAddress(formatted);
+            runCheck();
+          }catch(err){
+            console.error(err);
+            setBtnState("disabled");
+          }
+        } else {
+          setBtnState("disabled");
+        }
+      });
+
+      // Auto-check for manually typed full addresses
+      const autoCheck = debounce(()=>{
+        const val = input.value.trim();
+        if(isLikelyAddress(val)){
+          selectedPlace = null;
+          showFullAddress(val);
+          runCheck();
+        }
+      }, 700);
+
+      input.addEventListener("input", ()=>{ toggleClearBtn(); autoCheck(); });
+      input.addEventListener("keydown", (e)=>{
+        if(e.key==="Enter"){
+          e.preventDefault();
+          const val = input.value.trim();
+          if(val){ selectedPlace = null; runCheck(); }
+        }
+      });
+      input.addEventListener("blur", ()=>{
+        const val = input.value.trim();
+        if(isLikelyAddress(val)){ showFullAddress(val); runCheck(); }
+      });
+
+      clearBtn.addEventListener("click", (e)=>{
+        e.preventDefault();
+        input.value=""; selectedPlace=null; toggleClearBtn(); setBtnState("disabled"); clearDynamicBlocks(); input.focus();
+      });
+      btn.addEventListener("click", (e)=>{ if(btn.hasAttribute("disabled")) e.preventDefault(); });
+
+      toggleClearBtn(); setBtnState("disabled");
+    }catch(err){
+      console.error(err);
+      zoneMsg.innerHTML = `<span class="x-icon" aria-hidden="true">X</span><span class="zone-text"><strong>Address tools failed to load.</strong></span>`;
+      setBtnState("disabled");
+    }
+  }
+
+  // Load Google API + boot
+  document.addEventListener("DOMContentLoaded", ()=>{
+    const s = document.createElement("script");
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${CONFIG.GOOGLE_KEY}&libraries=places`;
+    s.async = true; s.onload = init;
+    s.onerror = ()=>{ zoneMsg.innerHTML = `<span class="x-icon" aria-hidden="true">X</span><span class="zone-text"><strong>Google Maps failed to load.</strong></span>`; setBtnState("disabled"); };
+    document.head.appendChild(s);
+  });
+})();
+</script>

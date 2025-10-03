@@ -97,7 +97,7 @@
     // Bias radius (miles) for Google Places Autocomplete; set to 0/false to disable.
     BIAS_RADIUS_MI: 100,
     // If true, predictions are confined to the bounds; if false, results are just biased.
-    STRICT_BOUNDS: false,
+    STRICT_BOUNDS: true,
 
     // 2-Zone thresholds (in miles)
     ZONE_THRESHOLDS: { Z1_MAX: 30, SERVICE_MAX: 55 }, // <=30 = Zone 1; 30–55 = Zone 2; >55 = OOS
